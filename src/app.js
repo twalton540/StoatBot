@@ -59,7 +59,7 @@ async function importDiscordToStoat(messageLimit = null) {
             console.log(`Imported message ${i + 1}/${messages.length}`);
 
             // Rate limit
-            await new Promise(resolve => setTimeout(resolve, 1000));
+            await new Promise(resolve => setTimeout(resolve, 250));
 
         } catch (error) {
             console.error(`Failed to import message ${msg.Id}:`, error);
@@ -88,4 +88,3 @@ async function main() {
 }
 
 main();
-

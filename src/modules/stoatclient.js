@@ -123,7 +123,6 @@ const stoatClient = {
 
         // Add attachments as part of content
         if (discordMsg.Attachments && discordMsg.Attachments.length > 0) {
-            payload.content += '\n\n**Attachments:**';
             discordMsg.Attachments.forEach(att => {
                 payload.content += `\n[${att.Filename}](${att.Url})`;
             });

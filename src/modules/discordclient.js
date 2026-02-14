@@ -65,7 +65,7 @@ const discordClient = {
 
         members.forEach(member => {
             discordClient.userCache.set(member.user.id, {
-                username: member.user.username,
+                username: member.displayName || member.user.username, // Use displayName here
                 displayName: member.displayName || member.user.username,
                 id: member.user.id
             });
@@ -134,7 +134,7 @@ const discordClient = {
                 const exportMsg = {
                     Id: msg.id,
                     Timestamp: msg.createdAt,
-                    Author: msg.author.username,
+                    Author: member?.displayName || msg.author.username,
                     AvatarUrl: avatarUrl,
                     RoleColor: roleColor,
                     Content: msg.content,
