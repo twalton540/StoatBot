@@ -4,6 +4,9 @@ node_modules/
 # environment variables
 .env
 
+#checkpoint file
+import_checkpoint.json
+
 npm-debug.log*
 .DS_Store
 Thumbs.db

@@ -85,14 +85,17 @@ const discordClient = {
         });
     },
 
-    fetchAllMessages: async (limit = null) => {
+    fetchAllMessages: async (limit = null, afterMessageId = null) => {
         const channel = await discordClient.getChannel();
         const guild = await dc.guilds.fetch(DISCORD_GUILD_ID);
 
         console.log(`Fetching messages from #${channel.name}...`);
+        if (afterMessageId) {
+            console.log(`Starting from message ID: ${afterMessageId}`);
+        }
 
         const allMessages = [];
-        let lastMessageId = null;
+        let lastMessageId = afterMessageId; // Start from the checkpoint message
         let fetchCount = 0;
 
         while (true) {
@@ -116,7 +119,7 @@ const discordClient = {
                     // Add to cache if not already there
                     if (!discordClient.userCache.has(msg.author.id)) {
                         discordClient.userCache.set(msg.author.id, {
-                            username: msg.author.username,
+                            username: member.displayName || msg.author.username,
                             displayName: member.displayName || msg.author.username,
                             id: msg.author.id
                         });
@@ -171,7 +174,7 @@ const discordClient = {
             }
 
             // Rate limit protection
-            await new Promise(resolve => setTimeout(resolve, 1000));
+            await new Promise(resolve => setTimeout(resolve, 100));
         }
 
         // Build message dictionary for reply authors

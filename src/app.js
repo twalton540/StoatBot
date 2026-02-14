@@ -1,20 +1,41 @@
 import stoatClient from './modules/stoatclient.js';
 import discordClient from './modules/discordclient.js';
+import checkpoint from './modules/checkpoint.js';
 
 async function importDiscordToStoat(messageLimit = null) {
+    // Load checkpoint if exists
+    const checkpointData = await checkpoint.load();
+
     // Track last message author and timestamp for smart timestamping
-    let lastAuthor = null;
-    let lastTimestamp = null;
+    let lastAuthor = checkpointData?.lastAuthor || null;
+    let lastTimestamp = checkpointData?.lastTimestamp ? new Date(checkpointData.lastTimestamp) : null;
 
     // Build user cache first
     await discordClient.buildUserCache();
 
     // Fetch all messages from Discord
     const messages = await discordClient.fetchAllMessages(messageLimit);
-    console.log(`Starting import of ${messages.length} messages to Stoat...`);
+    console.log(`Total messages to process: ${messages.length}`);
 
-    // Import each message
-    for (let i = 0; i < messages.length; i++) {
+    // Restore message ID map from checkpoint
+    const messageIdMap = new Map();
+    if (checkpointData?.messageIdMap) {
+        Object.entries(checkpointData.messageIdMap).forEach(([discordId, stoatId]) => {
+            messageIdMap.set(discordId, stoatId);
+        });
+    }
+
+    // Determine starting index
+    const startIndex = checkpointData?.lastProcessedIndex !== undefined
+        ? checkpointData.lastProcessedIndex + 1
+        : 0;
+
+    if (startIndex > 0) {
+        console.log(`Resuming from message ${startIndex + 1}...`);
+    }
+
+    // Process messages starting from checkpoint
+    for (let i = startIndex; i < messages.length; i++) {
         const msg = messages[i];
 
         try {
@@ -22,10 +43,7 @@ async function importDiscordToStoat(messageLimit = null) {
             let includeTimestamp = true;
 
             if (lastAuthor === msg.Author && lastTimestamp) {
-                // Calculate time difference in minutes
                 const timeDiff = (msg.Timestamp - lastTimestamp) / 1000 / 60;
-
-                // Don't include timestamp if same author and less than 30 minutes
                 if (timeDiff < 30) {
                     includeTimestamp = false;
                 }
@@ -34,11 +52,7 @@ async function importDiscordToStoat(messageLimit = null) {
             // Find the Stoat message ID to reply to
             let replyToStoatId = null;
             if (msg.ReplyTo && msg.ReplyTo.MessageId) {
-                // Find the original message in our array that has the matching Discord ID
-                const originalMsg = messages.find(m => m.Id === msg.ReplyTo.MessageId);
-                if (originalMsg && originalMsg.StoatMessageId) {
-                    replyToStoatId = originalMsg.StoatMessageId;
-                }
+                replyToStoatId = messageIdMap.get(msg.ReplyTo.MessageId) || null;
             }
 
             // Send to Stoat with mention replacement
@@ -49,24 +63,38 @@ async function importDiscordToStoat(messageLimit = null) {
                 discordClient.replaceMentions
             );
 
-            // Store the Stoat message ID in the Discord message object
-            msg.StoatMessageId = sentMessage.id;
+            // Store the Stoat message ID
+            messageIdMap.set(msg.Id, sentMessage.id);
 
             // Update last author and timestamp
             lastAuthor = msg.Author;
             lastTimestamp = msg.Timestamp;
 
-            console.log(`Imported message ${i + 1}/${messages.length}`);
+            // Save checkpoint after EVERY message
+            await checkpoint.save({
+                lastProcessedIndex: i,
+                lastAuthor: lastAuthor,
+                lastTimestamp: lastTimestamp.toISOString(),
+                messageIdMap: Object.fromEntries(messageIdMap),
+                totalMessages: messages.length
+            });
+
+            // Progress indicator
+            if ((i + 1) % 10 === 0) {
+                console.log(`Progress: ${i + 1}/${messages.length} (${((i + 1) / messages.length * 100).toFixed(1)}%)`);
+            }
 
             // Rate limit
             await new Promise(resolve => setTimeout(resolve, 100));
 
         } catch (error) {
-            console.error(`Failed to import message ${msg.Id}:`, error);
+            console.error(`Failed to import message ${msg.Id} (index ${i}):`, error);
+            throw error; // Checkpoint already saved, just exit
         }
     }
 
-    console.log('Import complete!');
+    console.log('\nImport complete!');
+    await checkpoint.clear(); // Clear checkpoint when fully done
 }
 
 async function main() {
@@ -77,17 +105,13 @@ async function main() {
 
         console.log('Both clients ready!');
 
-        // Optional: Override timezone manually if needed
-        // stoatClient.setTimezone('America/New_York');
-        // stoatClient.setTimezone('Europe/London');
-        // stoatClient.setTimezone('Asia/Tokyo');
-
-        // Import first 100 messages (or remove limit for all)
-        await importDiscordToStoat(100);
+        // Import messages with limit
+        await importDiscordToStoat(1000);
 
         process.exit(0);
     } catch (error) {
         console.error('Error:', error);
+        console.log('\nCheckpoint saved. Run the script again to resume from where it left off.');
         process.exit(1);
     }
 }
