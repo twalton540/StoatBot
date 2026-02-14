@@ -121,8 +121,17 @@ const stoatClient = {
             }).filter(e => e.title || e.description || e.url || e.media);
         }
 
+        // Add reactions in the initial payload
+        if (discordMsg.Reactions && discordMsg.Reactions.length > 0) {
+            payload.interactions = {
+                reactions: discordMsg.Reactions.map(r => r.Emoji),
+                restrict_reactions: false
+            };
+        }
+
         // Add attachments as part of content
         if (discordMsg.Attachments && discordMsg.Attachments.length > 0) {
+            payload.content += '\n\n**Attachments:**';
             discordMsg.Attachments.forEach(att => {
                 payload.content += `\n[${att.Filename}](${att.Url})`;
             });
@@ -130,17 +139,6 @@ const stoatClient = {
 
         // Send the message
         const sentMessage = await channel.sendMessage(payload);
-
-        // Add reactions if any
-        if (discordMsg.Reactions && discordMsg.Reactions.length > 0) {
-            for (const reaction of discordMsg.Reactions) {
-                try {
-                    await sentMessage.react(reaction.Emoji);
-                } catch (error) {
-                    console.warn(`Could not add reaction ${reaction.Emoji}:`, error.message);
-                }
-            }
-        }
 
         return sentMessage;
     }
