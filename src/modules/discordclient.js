@@ -98,7 +98,8 @@ const discordClient = {
         }
 
         const allMessages = [];
-        let lastMessageId = startBeforeMessageId; // Start from this point if provided
+        const fetchedMembers = new Map(); // Cache members we've already fetched
+        let lastMessageId = startBeforeMessageId;
         let fetchCount = 0;
 
         while (true) {
@@ -132,21 +133,41 @@ const discordClient = {
                     return allMessages;
                 }
 
+                // Get member for role color - check cache first
                 let member = null;
                 let roleColor = null;
-                try {
-                    member = await guild.members.fetch(msg.author.id);
-                    roleColor = await discordClient.getUserRoleColor(member);
+                let displayName = msg.author.username; // Default to username
 
-                    if (!discordClient.userCache.has(msg.author.id)) {
-                        discordClient.userCache.set(msg.author.id, {
-                            username: member.displayName || msg.author.username,
-                            displayName: member.displayName || msg.author.username,
-                            id: msg.author.id
-                        });
+                if (fetchedMembers.has(msg.author.id)) {
+                    // Use cached member
+                    const cachedMember = fetchedMembers.get(msg.author.id);
+                    if (cachedMember) {
+                        member = cachedMember;
+                        roleColor = await discordClient.getUserRoleColor(member);
+                        displayName = member.displayName || msg.author.username;
                     }
-                } catch (error) {
-                    console.warn(`Could not fetch member info for ${msg.author.username}`);
+                } else {
+                    // Try to fetch member
+                    try {
+                        member = await guild.members.fetch(msg.author.id);
+                        fetchedMembers.set(msg.author.id, member);
+                        roleColor = await discordClient.getUserRoleColor(member);
+                        displayName = member.displayName || msg.author.username;
+
+                        // Add to user cache if not already there
+                        if (!discordClient.userCache.has(msg.author.id)) {
+                            discordClient.userCache.set(msg.author.id, {
+                                username: displayName,
+                                displayName: displayName,
+                                id: msg.author.id
+                            });
+                        }
+                    } catch (error) {
+                        // Member left server or not accessible, cache null and use username
+                        fetchedMembers.set(msg.author.id, null);
+                        displayName = msg.author.username;
+                        // No warning needed, this is normal
+                    }
                 }
 
                 const avatarUrl = msg.author.displayAvatarURL({
@@ -157,7 +178,7 @@ const discordClient = {
                 const exportMsg = {
                     Id: msg.id,
                     Timestamp: msg.createdAt,
-                    Author: member?.displayName || msg.author.username,
+                    Author: displayName,
                     AvatarUrl: avatarUrl,
                     RoleColor: roleColor,
                     Content: msg.content,
