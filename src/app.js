@@ -59,7 +59,7 @@ async function importDiscordToStoat(messageLimit = null) {
             console.log(`Imported message ${i + 1}/${messages.length}`);
 
             // Rate limit
-            await new Promise(resolve => setTimeout(resolve, 250));
+            await new Promise(resolve => setTimeout(resolve, 100));
 
         } catch (error) {
             console.error(`Failed to import message ${msg.Id}:`, error);
@@ -76,6 +76,11 @@ async function main() {
         await discordClient.init();
 
         console.log('Both clients ready!');
+
+        // Optional: Override timezone manually if needed
+        // stoatClient.setTimezone('America/New_York');
+        // stoatClient.setTimezone('Europe/London');
+        // stoatClient.setTimezone('Asia/Tokyo');
 
         // Import first 100 messages (or remove limit for all)
         await importDiscordToStoat(100);

@@ -9,11 +9,13 @@ const client = new Client();
 const stoatClient = {
     client: client,
     channelId: STOAT_CHANNEL_ID,
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, // Auto-detect system timezone
 
     init: () => {
         return new Promise((resolve, reject) => {
             client.on("ready", async () => {
                 console.info(`Stoat logged in as ${client.user.username}!`);
+                console.info(`Using timezone: ${stoatClient.timezone}`);
                 resolve(client);
             });
 
@@ -23,6 +25,11 @@ const stoatClient = {
 
             client.loginBot(STOAT_TOKEN);
         });
+    },
+
+    setTimezone: (tz) => {
+        stoatClient.timezone = tz;
+        console.info(`Timezone set to: ${stoatClient.timezone}`);
     },
 
     getChannel: () => {
@@ -53,7 +60,7 @@ const stoatClient = {
         // Add timestamp only if requested
         if (includeTimestamp) {
             const timestamp = discordMsg.Timestamp.toLocaleString('en-US', {
-                timeZone: 'America/Chicago',
+                timeZone: stoatClient.timezone, // Use the configured timezone
                 year: 'numeric',
                 month: '2-digit',
                 day: '2-digit',
