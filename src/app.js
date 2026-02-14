@@ -1,28 +1,131 @@
 import stoatClient from './modules/stoatclient.js';
 import discordClient from './modules/discordclient.js';
 import checkpoint from './modules/checkpoint.js';
+import messageCache from './modules/messagecache.js';
 
-async function importDiscordToStoat(messageLimit = null) {
-    // Load checkpoint if exists
-    const checkpointData = await checkpoint.load();
+// Helper function to deduplicate messages by ID and sort chronologically
+function deduplicateMessages(messages) {
+    const seen = new Set();
+    const unique = [];
 
-    // Track last message author and timestamp for smart timestamping
-    let lastAuthor = checkpointData?.lastAuthor || null;
-    let lastTimestamp = checkpointData?.lastTimestamp ? new Date(checkpointData.lastTimestamp) : null;
+    for (const msg of messages) {
+        if (!seen.has(msg.Id)) {
+            seen.add(msg.Id);
+            unique.push(msg);
+        }
+    }
 
+    // Sort by timestamp (oldest first)
+    unique.sort((a, b) => new Date(a.Timestamp) - new Date(b.Timestamp));
+
+    return unique;
+}
+
+async function importDiscordToStoat(testMode = false, testLimit = 100) {
     // Build user cache first
     await discordClient.buildUserCache();
 
-    // Pass the last processed message ID so we stop fetching when we reach it
-    const lastProcessedMessageId = checkpointData?.lastDiscordMessageId || null;
-    const messages = await discordClient.fetchAllMessages(messageLimit, lastProcessedMessageId);
+    // PHASE 1: Ensure message cache is complete
+    if (!testMode) {
+        console.log('\n=== PHASE 1: Fetching Discord messages ===');
 
-    console.log(`Total messages to process: ${messages.length}`);
+        const cacheExists = await messageCache.exists();
+        let allMessages = [];
 
-    if (messages.length === 0) {
-        console.log('No new messages to process!');
+        if (cacheExists) {
+            console.log('Found existing message cache');
+            const cachedMessages = await messageCache.load();
+
+            if (cachedMessages && cachedMessages.length > 0) {
+                allMessages = cachedMessages;
+                console.log(`Cache has ${cachedMessages.length} messages`);
+
+                // Step 1: Fetch NEW messages (newer than cache)
+                const newestCachedMessageId = cachedMessages[cachedMessages.length - 1].Id;
+                console.log('Fetching newer messages...');
+
+                const newMessages = await discordClient.fetchAllMessages(null, newestCachedMessageId);
+
+                if (newMessages.length > 0) {
+                    console.log(`Found ${newMessages.length} new messages`);
+                    allMessages = deduplicateMessages([...cachedMessages, ...newMessages]);
+                    console.log(`After deduplication: ${allMessages.length} messages`);
+                    await messageCache.save(allMessages);
+                } else {
+                    console.log('No new messages found');
+                }
+
+                // Step 2: Fetch OLDER messages (older than cache)
+                const oldestCachedMessageId = allMessages[0].Id;
+                console.log('Fetching older messages...');
+
+                // Callback to save cache every 1000 messages during fetch
+                const saveBatchCallback = async (olderMessages) => {
+                    // Prepend older messages to the cache and deduplicate
+                    const merged = deduplicateMessages([...olderMessages, ...allMessages]);
+                    allMessages = merged;
+                    await messageCache.save(merged);
+                    console.log(`Cached ${merged.length} total messages (deduplicated)`);
+                };
+
+                const olderMessages = await discordClient.fetchAllMessages(null, null, saveBatchCallback, oldestCachedMessageId);
+
+                if (olderMessages.length > 0) {
+                    console.log(`Found ${olderMessages.length} older messages`);
+                    allMessages = deduplicateMessages([...olderMessages, ...allMessages]);
+                    console.log(`After deduplication: ${allMessages.length} messages`);
+                    await messageCache.save(allMessages);
+                } else {
+                    console.log('No older messages found');
+                }
+            }
+        } else {
+            console.log('No cache found, fetching all messages from Discord...');
+
+            // Callback to save cache every 1000 messages during fetch
+            const saveBatchCallback = async (messages) => {
+                const deduplicated = deduplicateMessages(messages);
+                await messageCache.save(deduplicated);
+                console.log(`Cached ${deduplicated.length} messages (deduplicated)`);
+            };
+
+            // First time - fetch all messages from Discord
+            allMessages = await discordClient.fetchAllMessages(null, null, saveBatchCallback);
+
+            if (allMessages.length > 0) {
+                allMessages = deduplicateMessages(allMessages);
+                await messageCache.save(allMessages);
+                console.log(`Initial cache complete: ${allMessages.length} messages`);
+            }
+        }
+
+        console.log(`\nTotal messages in cache: ${allMessages.length}`);
+    } else {
+        console.log('\n=== TEST MODE: Skipping fetch phase ===');
+    }
+
+    // Load cache for sending phase
+    const allMessages = await messageCache.load();
+
+    if (!allMessages || allMessages.length === 0) {
+        console.log('No messages in cache!');
         return;
     }
+
+    console.log(`\nTotal messages in cache: ${allMessages.length}`);
+
+    // PHASE 2: Send messages to Stoat
+    console.log('\n=== PHASE 2: Sending messages to Stoat ===');
+
+    if (testMode) {
+        console.log(`TEST MODE: Will only send ${testLimit} messages`);
+    }
+
+    // Load checkpoint to see where we left off sending
+    const checkpointData = await checkpoint.load();
+
+    let lastAuthor = checkpointData?.lastAuthor || null;
+    let lastTimestamp = checkpointData?.lastTimestamp ? new Date(checkpointData.lastTimestamp) : null;
 
     // Restore message ID map from checkpoint
     const messageIdMap = new Map();
@@ -32,81 +135,153 @@ async function importDiscordToStoat(messageLimit = null) {
         });
     }
 
-    // Process all messages (no index tracking needed now)
-    for (let i = 0; i < messages.length; i++) {
-        const msg = messages[i];
+    // Find starting index based on checkpoint
+    let startIndex = 0;
+    if (checkpointData?.lastDiscordMessageId) {
+        startIndex = allMessages.findIndex(m => m.Id === checkpointData.lastDiscordMessageId);
+        if (startIndex !== -1) {
+            startIndex++;
+            console.log(`Resuming sending from message ${startIndex + 1}/${allMessages.length}`);
+        } else {
+            console.log('Could not find checkpoint in cache, starting from beginning');
+            startIndex = 0;
+        }
+    } else {
+        console.log('No checkpoint found, starting from first message');
+    }
+
+    // Calculate end index for test mode
+    const endIndex = testMode ? Math.min(startIndex + testLimit, allMessages.length) : allMessages.length;
+
+    // Process messages starting from checkpoint
+    for (let i = startIndex; i < endIndex; i++) {
+        const msg = allMessages[i];
 
         try {
             // Determine if we should include timestamp
             let includeTimestamp = true;
 
             if (lastAuthor === msg.Author && lastTimestamp) {
-                const timeDiff = (msg.Timestamp - lastTimestamp) / 1000 / 60;
+                const currentTimestamp = new Date(msg.Timestamp);
+                const timeDiff = (currentTimestamp - lastTimestamp) / 1000 / 60;
                 if (timeDiff < 30) {
                     includeTimestamp = false;
                 }
             }
 
-            // Find the Stoat message ID to reply to
             let replyToStoatId = null;
             if (msg.ReplyTo && msg.ReplyTo.MessageId) {
                 replyToStoatId = messageIdMap.get(msg.ReplyTo.MessageId) || null;
             }
 
-            // Send to Stoat with mention replacement
-            const sentMessage = await stoatClient.sendDiscordMessage(
-                msg,
-                replyToStoatId,
-                includeTimestamp,
-                discordClient.replaceMentions
-            );
+            let sentMessage;
+            let attempts = 0;
+            const maxAttempts = 3;
 
-            // Store the Stoat message ID
+            while (attempts < maxAttempts) {
+                try {
+                    sentMessage = await stoatClient.sendDiscordMessage(
+                        msg,
+                        replyToStoatId,
+                        includeTimestamp,
+                        discordClient.replaceMentions
+                    );
+                    break; // Success, exit retry loop
+                } catch (sendError) {
+                    attempts++;
+
+                    // Check if it's a rate limit error
+                    if (sendError.retry_after) {
+                        const waitMs = sendError.retry_after;
+                        console.log(`Rate limited! Waiting ${waitMs}ms before retry (attempt ${attempts}/${maxAttempts})...`);
+                        await new Promise(resolve => setTimeout(resolve, waitMs));
+                        continue; // Retry
+                    }
+
+                    // Check if error object has retry_after property
+                    if (typeof sendError === 'object' && sendError !== null) {
+                        try {
+                            const errorObj = typeof sendError === 'string' ? JSON.parse(sendError) : sendError;
+                            if (errorObj.retry_after) {
+                                const waitMs = errorObj.retry_after;
+                                console.log(`Rate limited! Waiting ${waitMs}ms before retry (attempt ${attempts}/${maxAttempts})...`);
+                                await new Promise(resolve => setTimeout(resolve, waitMs));
+                                continue; // Retry
+                            }
+                        } catch (parseError) {
+                            // Not a JSON error, continue to reaction retry
+                        }
+                    }
+
+                    // If it's not a rate limit, try without reactions
+                    if (attempts >= maxAttempts && msg.Reactions && msg.Reactions.length > 0) {
+                        console.log('Retrying without reactions...');
+                        const msgWithoutReactions = { ...msg, Reactions: [] };
+                        sentMessage = await stoatClient.sendDiscordMessage(
+                            msgWithoutReactions,
+                            replyToStoatId,
+                            includeTimestamp,
+                            discordClient.replaceMentions
+                        );
+                        console.log('Success without reactions!');
+                        break;
+                    }
+
+                    // If all retries failed, throw the error
+                    if (attempts >= maxAttempts) {
+                        throw sendError;
+                    }
+                }
+            }
+
             messageIdMap.set(msg.Id, sentMessage.id);
 
-            // Update last author and timestamp
             lastAuthor = msg.Author;
-            lastTimestamp = msg.Timestamp;
+            lastTimestamp = new Date(msg.Timestamp);
 
-            // Save checkpoint after EVERY message
             await checkpoint.save({
                 lastDiscordMessageId: msg.Id,
                 lastAuthor: lastAuthor,
-                lastTimestamp: lastTimestamp.toISOString(),
+                lastTimestamp: msg.Timestamp,
                 messageIdMap: Object.fromEntries(messageIdMap)
             });
 
-            // Progress indicator
-            if ((i + 1) % 10 === 0) {
-                console.log(`Progress: ${i + 1}/${messages.length}`);
+            if ((i + 1) % 10 === 0 || testMode) {
+                console.log(`Sending progress: ${i + 1}/${testMode ? endIndex : allMessages.length} (${((i + 1) / (testMode ? endIndex : allMessages.length) * 100).toFixed(1)}%)`);
             }
 
-            // Rate limit
             await new Promise(resolve => setTimeout(resolve, 100));
 
         } catch (error) {
-            console.error(`Failed to import message ${msg.Id}:`, error);
-            throw error; // Checkpoint already saved, just exit
+            console.error(`Failed to import message ${msg.Id} after all retries:`, error);
+            throw error;
         }
     }
 
-    console.log('\nBatch complete!');
+    if (testMode) {
+        console.log(`\n=== TEST COMPLETE: Sent ${testLimit} messages ===`);
+    } else {
+        console.log('\n=== All messages sent successfully! ===');
+    }
 }
+
 async function main() {
     try {
-        // Initialize both clients
         await stoatClient.init();
         await discordClient.init();
 
         console.log('Both clients ready!');
 
-        // Import messages with limit
-        await importDiscordToStoat(1000);
+        // TEST MODE: Only send 100 messages without fetching
+        //await importDiscordToStoat(true, 200);
+
+        // PRODUCTION MODE: Fetch and send everything
+        await importDiscordToStoat(false);
 
         process.exit(0);
     } catch (error) {
         console.error('Error:', error);
-        console.log('\nCheckpoint saved. Run the script again to resume from where it left off.');
+        console.log('\nProgress saved. Run the script again to resume.');
         process.exit(1);
     }
 }

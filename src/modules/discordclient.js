@@ -85,17 +85,20 @@ const discordClient = {
         });
     },
 
-    fetchAllMessages: async (limit = null, lastProcessedMessageId = null) => {
+    fetchAllMessages: async (limit = null, stopAtMessageId = null, onBatchFetched = null, startBeforeMessageId = null) => {
         const channel = await discordClient.getChannel();
         const guild = await dc.guilds.fetch(DISCORD_GUILD_ID);
 
         console.log(`Fetching messages from #${channel.name}...`);
-        if (lastProcessedMessageId) {
-            console.log(`Will stop fetching when we reach: ${lastProcessedMessageId}`);
+        if (stopAtMessageId) {
+            console.log(`Will stop fetching when we reach: ${stopAtMessageId}`);
+        }
+        if (startBeforeMessageId) {
+            console.log(`Starting fetch before: ${startBeforeMessageId}`);
         }
 
         const allMessages = [];
-        let lastMessageId = null;
+        let lastMessageId = startBeforeMessageId; // Start from this point if provided
         let fetchCount = 0;
 
         while (true) {
@@ -109,20 +112,32 @@ const discordClient = {
             if (messages.size === 0) break;
 
             for (const [id, msg] of messages) {
-                // Stop fetching if we've reached the last processed message
-                if (lastProcessedMessageId && msg.id === lastProcessedMessageId) {
-                    console.log('Reached last processed message, stopping fetch');
-                    return allMessages.reverse(); // Return what we have so far
+                // Stop fetching if we've reached the stop message
+                if (stopAtMessageId && msg.id === stopAtMessageId) {
+                    console.log('Reached stop message, ending fetch');
+
+                    // Build message dictionary for reply authors
+                    const messageDict = new Map();
+                    allMessages.forEach(msg => {
+                        messageDict.set(msg.Id, msg.Author);
+                    });
+
+                    allMessages.forEach(msg => {
+                        if (msg.ReplyTo && messageDict.has(msg.ReplyTo.MessageId)) {
+                            msg.ReplyTo.Author = messageDict.get(msg.ReplyTo.MessageId);
+                        }
+                    });
+
+                    allMessages.reverse();
+                    return allMessages;
                 }
 
-                // Get member for role color
                 let member = null;
                 let roleColor = null;
                 try {
                     member = await guild.members.fetch(msg.author.id);
                     roleColor = await discordClient.getUserRoleColor(member);
 
-                    // Add to cache if not already there
                     if (!discordClient.userCache.has(msg.author.id)) {
                         discordClient.userCache.set(msg.author.id, {
                             username: member.displayName || msg.author.username,
@@ -134,7 +149,6 @@ const discordClient = {
                     console.warn(`Could not fetch member info for ${msg.author.username}`);
                 }
 
-                // Get user avatar URL (prefer guild avatar, fallback to global avatar)
                 const avatarUrl = msg.author.displayAvatarURL({
                     extension: 'png',
                     size: 256
@@ -169,36 +183,35 @@ const discordClient = {
 
                 allMessages.push(exportMsg);
                 fetchCount++;
+
+                // Call callback every 1000 messages if provided
+                if (onBatchFetched && fetchCount % 1000 === 0) {
+                    await onBatchFetched(allMessages);
+                }
             }
 
             lastMessageId = messages.last().id;
             console.log(`Fetched ${fetchCount} messages...`);
 
-            // Check limit
             if (limit && fetchCount >= limit) {
                 break;
             }
 
-            // Rate limit protection
             await new Promise(resolve => setTimeout(resolve, 100));
         }
 
-        // Build message dictionary for reply authors
         const messageDict = new Map();
         allMessages.forEach(msg => {
             messageDict.set(msg.Id, msg.Author);
         });
 
-        // Add reply author names
         allMessages.forEach(msg => {
             if (msg.ReplyTo && messageDict.has(msg.ReplyTo.MessageId)) {
                 msg.ReplyTo.Author = messageDict.get(msg.ReplyTo.MessageId);
             }
         });
 
-        // Reverse to chronological order (oldest first)
         allMessages.reverse();
-
         return allMessages;
     }
 };

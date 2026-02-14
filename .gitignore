@@ -6,6 +6,7 @@ node_modules/
 
 #checkpoint file
 import_checkpoint.json
+discord_messages_cache.json
 
 npm-debug.log*
 .DS_Store
