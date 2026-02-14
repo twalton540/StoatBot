@@ -85,17 +85,17 @@ const discordClient = {
         });
     },
 
-    fetchAllMessages: async (limit = null, afterMessageId = null) => {
+    fetchAllMessages: async (limit = null, lastProcessedMessageId = null) => {
         const channel = await discordClient.getChannel();
         const guild = await dc.guilds.fetch(DISCORD_GUILD_ID);
 
         console.log(`Fetching messages from #${channel.name}...`);
-        if (afterMessageId) {
-            console.log(`Starting from message ID: ${afterMessageId}`);
+        if (lastProcessedMessageId) {
+            console.log(`Will stop fetching when we reach: ${lastProcessedMessageId}`);
         }
 
         const allMessages = [];
-        let lastMessageId = afterMessageId; // Start from the checkpoint message
+        let lastMessageId = null;
         let fetchCount = 0;
 
         while (true) {
@@ -109,6 +109,12 @@ const discordClient = {
             if (messages.size === 0) break;
 
             for (const [id, msg] of messages) {
+                // Stop fetching if we've reached the last processed message
+                if (lastProcessedMessageId && msg.id === lastProcessedMessageId) {
+                    console.log('Reached last processed message, stopping fetch');
+                    return allMessages.reverse(); // Return what we have so far
+                }
+
                 // Get member for role color
                 let member = null;
                 let roleColor = null;
@@ -162,10 +168,10 @@ const discordClient = {
                 };
 
                 allMessages.push(exportMsg);
+                fetchCount++;
             }
 
             lastMessageId = messages.last().id;
-            fetchCount += messages.size;
             console.log(`Fetched ${fetchCount} messages...`);
 
             // Check limit

@@ -13,9 +13,16 @@ async function importDiscordToStoat(messageLimit = null) {
     // Build user cache first
     await discordClient.buildUserCache();
 
-    // Fetch all messages from Discord
-    const messages = await discordClient.fetchAllMessages(messageLimit);
+    // Pass the last processed message ID so we stop fetching when we reach it
+    const lastProcessedMessageId = checkpointData?.lastDiscordMessageId || null;
+    const messages = await discordClient.fetchAllMessages(messageLimit, lastProcessedMessageId);
+
     console.log(`Total messages to process: ${messages.length}`);
+
+    if (messages.length === 0) {
+        console.log('No new messages to process!');
+        return;
+    }
 
     // Restore message ID map from checkpoint
     const messageIdMap = new Map();
@@ -25,17 +32,8 @@ async function importDiscordToStoat(messageLimit = null) {
         });
     }
 
-    // Determine starting index
-    const startIndex = checkpointData?.lastProcessedIndex !== undefined
-        ? checkpointData.lastProcessedIndex + 1
-        : 0;
-
-    if (startIndex > 0) {
-        console.log(`Resuming from message ${startIndex + 1}...`);
-    }
-
-    // Process messages starting from checkpoint
-    for (let i = startIndex; i < messages.length; i++) {
+    // Process all messages (no index tracking needed now)
+    for (let i = 0; i < messages.length; i++) {
         const msg = messages[i];
 
         try {
@@ -72,31 +70,28 @@ async function importDiscordToStoat(messageLimit = null) {
 
             // Save checkpoint after EVERY message
             await checkpoint.save({
-                lastProcessedIndex: i,
+                lastDiscordMessageId: msg.Id,
                 lastAuthor: lastAuthor,
                 lastTimestamp: lastTimestamp.toISOString(),
-                messageIdMap: Object.fromEntries(messageIdMap),
-                totalMessages: messages.length
+                messageIdMap: Object.fromEntries(messageIdMap)
             });
 
             // Progress indicator
             if ((i + 1) % 10 === 0) {
-                console.log(`Progress: ${i + 1}/${messages.length} (${((i + 1) / messages.length * 100).toFixed(1)}%)`);
+                console.log(`Progress: ${i + 1}/${messages.length}`);
             }
 
             // Rate limit
             await new Promise(resolve => setTimeout(resolve, 100));
 
         } catch (error) {
-            console.error(`Failed to import message ${msg.Id} (index ${i}):`, error);
+            console.error(`Failed to import message ${msg.Id}:`, error);
             throw error; // Checkpoint already saved, just exit
         }
     }
 
-    console.log('\nImport complete!');
-    await checkpoint.clear(); // Clear checkpoint when fully done
+    console.log('\nBatch complete!');
 }
-
 async function main() {
     try {
         // Initialize both clients
