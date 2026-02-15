@@ -60,7 +60,7 @@ const stoatClient = {
         // Add timestamp only if requested
         if (includeTimestamp) {
             const timestamp = discordMsg.Timestamp.toLocaleString('en-US', {
-                timeZone: stoatClient.timezone, // Use the configured timezone
+                timeZone: stoatClient.timezone,
                 year: 'numeric',
                 month: '2-digit',
                 day: '2-digit',
@@ -69,6 +69,22 @@ const stoatClient = {
                 second: '2-digit'
             });
             content = `(${timestamp})\n${content}`;
+        }
+
+        // Add attachments as part of content
+        if (discordMsg.Attachments && discordMsg.Attachments.length > 0) {
+            discordMsg.Attachments.forEach(att => {
+                content += `\n[${att.Filename}](${att.Url})`;
+            });
+        }
+
+        // Ensure content is not empty and truncate to 2000 characters
+        content = content.trim();
+        if (!content || content.length === 0) {
+            content = '(no content)';
+        }
+        if (content.length > 2000) {
+            content = content.substring(0, 1997) + '...';
         }
 
         // Prepare masquerade with avatar and role color
@@ -86,7 +102,7 @@ const stoatClient = {
 
         // Prepare message payload
         const payload = {
-            content: content.trim(),
+            content: content,
             masquerade: masquerade
         };
 
@@ -105,7 +121,7 @@ const stoatClient = {
                 let processedEmbed = {
                     title: embed.Title || null,
                     description: embed.Description || null,
-                    url: embed.Url && embed.Url.length <= 256 ? embed.Url : null, // Truncate long URLs
+                    url: embed.Url && embed.Url.length <= 256 ? embed.Url : null,
                     media: embed.ImageUrl || null,
                     icon_url: embed.ThumbnailUrl || null
                 };
@@ -136,14 +152,6 @@ const stoatClient = {
             };
         }
 
-        // Add attachments as part of content
-        if (discordMsg.Attachments && discordMsg.Attachments.length > 0) {
-            payload.content += '\n\n**Attachments:**';
-            discordMsg.Attachments.forEach(att => {
-                payload.content += `\n[${att.Filename}](${att.Url})`;
-            });
-        }
-        if (payload.content == "" || payload.content == null) payload.content = " ";
         // Send the message
         const sentMessage = await channel.sendMessage(payload);
 
