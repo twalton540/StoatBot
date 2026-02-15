@@ -2,7 +2,7 @@ import fs from 'fs/promises';
 import 'dotenv/config';
 
 const STOAT_CHANNEL_ID = process.env.STOAT_CHANNEL_ID;
-const CACHE_FILE = `./discord_messages_cache_${STOAT_CHANNEL_ID}.json`;
+const CACHE_FILE = `./import_${STOAT_CHANNEL_ID}.json`;
 
 const messageCache = {
     save: async (messages) => {
