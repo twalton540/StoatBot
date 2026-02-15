@@ -105,7 +105,7 @@ const stoatClient = {
                 let processedEmbed = {
                     title: embed.Title || null,
                     description: embed.Description || null,
-                    url: embed.Url || null,
+                    url: embed.Url && embed.Url.length <= 256 ? embed.Url : null, // Truncate long URLs
                     media: embed.ImageUrl || null,
                     icon_url: embed.ThumbnailUrl || null
                 };

@@ -234,7 +234,7 @@ async function importDiscordToStoat() {
                 console.log(`Sending progress: ${i + 1}/${allMessages.length} (${((i + 1) / allMessages.length * 100).toFixed(1)}%)`);
             }
 
-            await new Promise(resolve => setTimeout(resolve, 100));
+            await new Promise(resolve => setTimeout(resolve, 50));
 
         } catch (error) {
             console.error(`Failed to import message ${msg.Id} after all retries:`, error);
