@@ -141,7 +141,11 @@ const stoatClient = {
                 }
 
                 return processedEmbed;
-            }).filter(e => e.title || e.description || e.url || e.media);
+            }).filter(e => {
+                // Only include embeds that have at least title, description, or url
+                // Don't send embeds with only media (images) as Stoat can't handle them
+                return e.title || e.description || e.url;
+            });
         }
 
         // Add reactions in the initial payload
