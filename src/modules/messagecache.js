@@ -1,11 +1,15 @@
 import fs from 'fs/promises';
+import 'dotenv/config';
 
-const CACHE_FILE = './discord_messages_cache.json';
+const DISCORD_GUILD_ID = process.env.DISCORD_GUILD_ID;
+const DISCORD_CHANNEL_ID = process.env.DISCORD_CHANNEL_ID;
+const CACHE_FILE = `./export_${DISCORD_GUILD_ID}_${DISCORD_CHANNEL_ID}.json`;
 
 const messageCache = {
     save: async (messages) => {
         try {
             await fs.writeFile(CACHE_FILE, JSON.stringify(messages, null, 2));
+            console.log(`Cached ${messages.length} messages to disk`);
         } catch (error) {
             console.error('Failed to save message cache:', error);
         }

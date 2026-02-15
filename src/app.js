@@ -21,105 +21,92 @@ function deduplicateMessages(messages) {
     return unique;
 }
 
-async function importDiscordToStoat(testMode = false, testLimit = 100) {
+async function importDiscordToStoat() {
     // Build user cache first
     await discordClient.buildUserCache();
 
     // PHASE 1: Ensure message cache is complete
-    if (!testMode) {
-        console.log('\n=== PHASE 1: Fetching Discord messages ===');
+    console.log('\n=== PHASE 1: Fetching Discord messages ===');
 
-        const cacheExists = await messageCache.exists();
-        let allMessages = [];
+    const cacheExists = await messageCache.exists();
+    let allMessages = [];
 
-        if (cacheExists) {
-            console.log('Found existing message cache');
-            const cachedMessages = await messageCache.load();
+    if (cacheExists) {
+        console.log('Found existing message cache');
+        const cachedMessages = await messageCache.load();
 
-            if (cachedMessages && cachedMessages.length > 0) {
-                allMessages = cachedMessages;
-                console.log(`Cache has ${cachedMessages.length} messages`);
+        if (cachedMessages && cachedMessages.length > 0) {
+            allMessages = cachedMessages;
+            console.log(`Cache has ${cachedMessages.length} messages`);
 
-                // Step 1: Fetch NEW messages (newer than cache)
-                const newestCachedMessageId = cachedMessages[cachedMessages.length - 1].Id;
-                console.log('Fetching newer messages...');
+            // Step 1: Fetch NEW messages (newer than cache)
+            const newestCachedMessageId = cachedMessages[cachedMessages.length - 1].Id;
+            console.log('Fetching newer messages...');
 
-                const newMessages = await discordClient.fetchAllMessages(null, newestCachedMessageId);
+            const newMessages = await discordClient.fetchAllMessages(null, newestCachedMessageId);
 
-                if (newMessages.length > 0) {
-                    console.log(`Found ${newMessages.length} new messages`);
-                    allMessages = deduplicateMessages([...cachedMessages, ...newMessages]);
-                    console.log(`After deduplication: ${allMessages.length} messages`);
-                    await messageCache.save(allMessages);
-                } else {
-                    console.log('No new messages found');
-                }
-
-                // Step 2: Fetch OLDER messages (older than cache)
-                const oldestCachedMessageId = allMessages[0].Id;
-                console.log('Fetching older messages...');
-
-                // Callback to save cache every 1000 messages during fetch
-                const saveBatchCallback = async (olderMessages) => {
-                    // Prepend older messages to the cache and deduplicate
-                    const merged = deduplicateMessages([...olderMessages, ...allMessages]);
-                    allMessages = merged;
-                    await messageCache.save(merged);
-                    console.log(`Cached ${merged.length} total messages (deduplicated)`);
-                };
-
-                const olderMessages = await discordClient.fetchAllMessages(null, null, saveBatchCallback, oldestCachedMessageId);
-
-                if (olderMessages.length > 0) {
-                    console.log(`Found ${olderMessages.length} older messages`);
-                    allMessages = deduplicateMessages([...olderMessages, ...allMessages]);
-                    console.log(`After deduplication: ${allMessages.length} messages`);
-                    await messageCache.save(allMessages);
-                } else {
-                    console.log('No older messages found');
-                }
+            if (newMessages.length > 0) {
+                console.log(`Found ${newMessages.length} new messages`);
+                allMessages = deduplicateMessages([...cachedMessages, ...newMessages]);
+                console.log(`After deduplication: ${allMessages.length} messages`);
+                await messageCache.save(allMessages);
+            } else {
+                console.log('No new messages found');
             }
-        } else {
-            console.log('No cache found, fetching all messages from Discord...');
+
+            // Step 2: Fetch OLDER messages (older than cache)
+            const oldestCachedMessageId = allMessages[0].Id;
+            console.log('Fetching older messages...');
 
             // Callback to save cache every 1000 messages during fetch
-            const saveBatchCallback = async (messages) => {
-                const deduplicated = deduplicateMessages(messages);
-                await messageCache.save(deduplicated);
-                console.log(`Cached ${deduplicated.length} messages (deduplicated)`);
+            const saveBatchCallback = async (olderMessages) => {
+                // Prepend older messages to the cache and deduplicate
+                const merged = deduplicateMessages([...olderMessages, ...allMessages]);
+                allMessages = merged;
+                await messageCache.save(merged);
+                console.log(`Cached ${merged.length} total messages (deduplicated)`);
             };
 
-            // First time - fetch all messages from Discord
-            allMessages = await discordClient.fetchAllMessages(null, null, saveBatchCallback);
+            const olderMessages = await discordClient.fetchAllMessages(null, null, saveBatchCallback, oldestCachedMessageId);
 
-            if (allMessages.length > 0) {
-                allMessages = deduplicateMessages(allMessages);
+            if (olderMessages.length > 0) {
+                console.log(`Found ${olderMessages.length} older messages`);
+                allMessages = deduplicateMessages([...olderMessages, ...allMessages]);
+                console.log(`After deduplication: ${allMessages.length} messages`);
                 await messageCache.save(allMessages);
-                console.log(`Initial cache complete: ${allMessages.length} messages`);
+            } else {
+                console.log('No older messages found');
             }
         }
-
-        console.log(`\nTotal messages in cache: ${allMessages.length}`);
     } else {
-        console.log('\n=== TEST MODE: Skipping fetch phase ===');
-    }
+        console.log('No cache found, fetching all messages from Discord...');
 
-    // Load cache for sending phase
-    const allMessages = await messageCache.load();
+        // Callback to save cache every 1000 messages during fetch
+        const saveBatchCallback = async (messages) => {
+            const deduplicated = deduplicateMessages(messages);
+            await messageCache.save(deduplicated);
+            console.log(`Cached ${deduplicated.length} messages (deduplicated)`);
+        };
 
-    if (!allMessages || allMessages.length === 0) {
-        console.log('No messages in cache!');
-        return;
+        // First time - fetch all messages from Discord
+        allMessages = await discordClient.fetchAllMessages(null, null, saveBatchCallback);
+
+        if (allMessages.length > 0) {
+            allMessages = deduplicateMessages(allMessages);
+            await messageCache.save(allMessages);
+            console.log(`Initial cache complete: ${allMessages.length} messages`);
+        }
     }
 
     console.log(`\nTotal messages in cache: ${allMessages.length}`);
 
+    if (allMessages.length === 0) {
+        console.log('No messages in cache!');
+        return;
+    }
+
     // PHASE 2: Send messages to Stoat
     console.log('\n=== PHASE 2: Sending messages to Stoat ===');
-
-    if (testMode) {
-        console.log(`TEST MODE: Will only send ${testLimit} messages`);
-    }
 
     // Load checkpoint to see where we left off sending
     const checkpointData = await checkpoint.load();
@@ -150,11 +137,8 @@ async function importDiscordToStoat(testMode = false, testLimit = 100) {
         console.log('No checkpoint found, starting from first message');
     }
 
-    // Calculate end index for test mode
-    const endIndex = testMode ? Math.min(startIndex + testLimit, allMessages.length) : allMessages.length;
-
     // Process messages starting from checkpoint
-    for (let i = startIndex; i < endIndex; i++) {
+    for (let i = startIndex; i < allMessages.length; i++) {
         const msg = allMessages[i];
 
         try {
@@ -246,8 +230,8 @@ async function importDiscordToStoat(testMode = false, testLimit = 100) {
                 messageIdMap: Object.fromEntries(messageIdMap)
             });
 
-            if ((i + 1) % 10 === 0 || testMode) {
-                console.log(`Sending progress: ${i + 1}/${testMode ? endIndex : allMessages.length} (${((i + 1) / (testMode ? endIndex : allMessages.length) * 100).toFixed(1)}%)`);
+            if ((i + 1) % 10 === 0) {
+                console.log(`Sending progress: ${i + 1}/${allMessages.length} (${((i + 1) / allMessages.length * 100).toFixed(1)}%)`);
             }
 
             await new Promise(resolve => setTimeout(resolve, 100));
@@ -258,11 +242,7 @@ async function importDiscordToStoat(testMode = false, testLimit = 100) {
         }
     }
 
-    if (testMode) {
-        console.log(`\n=== TEST COMPLETE: Sent ${testLimit} messages ===`);
-    } else {
-        console.log('\n=== All messages sent successfully! ===');
-    }
+    console.log('\n=== All messages sent successfully! ===');
 }
 
 async function main() {
@@ -272,11 +252,7 @@ async function main() {
 
         console.log('Both clients ready!');
 
-        // TEST MODE: Only send 100 messages without fetching
-        //await importDiscordToStoat(true, 200);
-
-        // PRODUCTION MODE: Fetch and send everything
-        await importDiscordToStoat(false);
+        await importDiscordToStoat();
 
         process.exit(0);
     } catch (error) {

@@ -1,42 +1,42 @@
 import fs from 'fs/promises';
+import 'dotenv/config';
 
-const CHECKPOINT_FILE = './import_checkpoint.json';
+const STOAT_CHANNEL_ID = process.env.STOAT_CHANNEL_ID;
+const CACHE_FILE = `./discord_messages_cache_${STOAT_CHANNEL_ID}.json`;
 
-const checkpoint = {
-    save: async (data) => {
+const messageCache = {
+    save: async (messages) => {
         try {
-            await fs.writeFile(CHECKPOINT_FILE, JSON.stringify(data, null, 2));
+            await fs.writeFile(CACHE_FILE, JSON.stringify(messages, null, 2));
         } catch (error) {
-            console.error('Failed to save checkpoint:', error);
+            console.error('Failed to save message cache:', error);
         }
     },
 
     load: async () => {
         try {
-            const data = await fs.readFile(CHECKPOINT_FILE, 'utf-8');
-            const parsed = JSON.parse(data);
-            console.log(`Resuming from checkpoint: ${parsed.lastProcessedIndex + 1} messages already processed`);
-            return parsed;
+            const data = await fs.readFile(CACHE_FILE, 'utf-8');
+            const messages = JSON.parse(data);
+            console.log(`Loaded ${messages.length} cached messages from disk`);
+            return messages;
         } catch (error) {
             if (error.code === 'ENOENT') {
-                console.log('No checkpoint found, starting fresh');
+                console.log('No message cache found');
                 return null;
             }
-            console.error('Failed to load checkpoint:', error);
+            console.error('Failed to load message cache:', error);
             return null;
         }
     },
 
-    clear: async () => {
+    exists: async () => {
         try {
-            await fs.unlink(CHECKPOINT_FILE);
-            console.log('Checkpoint file cleared');
-        } catch (error) {
-            if (error.code !== 'ENOENT') {
-                console.error('Failed to clear checkpoint:', error);
-            }
+            await fs.access(CACHE_FILE);
+            return true;
+        } catch {
+            return false;
         }
     }
 };
 
-export default checkpoint;
+export default messageCache;

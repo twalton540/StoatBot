@@ -4,9 +4,9 @@ node_modules/
 # environment variables
 .env
 
-#checkpoint file
-import_checkpoint.json
-discord_messages_cache.json
+# Ignore cache and checkpoint files
+export_*.json
+import_*.json
 
 npm-debug.log*
 .DS_Store

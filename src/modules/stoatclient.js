@@ -143,7 +143,7 @@ const stoatClient = {
                 payload.content += `\n[${att.Filename}](${att.Url})`;
             });
         }
-
+        if (payload.content == "" || payload.content == null) payload.content = " ";
         // Send the message
         const sentMessage = await channel.sendMessage(payload);
 
