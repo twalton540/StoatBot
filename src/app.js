@@ -174,6 +174,23 @@ async function importDiscordToStoat() {
                 } catch (sendError) {
                     attempts++;
 
+                    // Check for 401 Unauthorized - this is critical
+                    if (sendError.type === 'Unauthorized' ||
+                        (typeof sendError === 'object' && sendError.type === 'Unauthorized')) {
+                        console.error('CRITICAL: 401 Unauthorized from Stoat!');
+                        console.error('Bot token may be invalid or expired. Attempting to reconnect...');
+
+                        // Try to reconnect
+                        try {
+                            await stoatClient.reconnect();
+                            console.log('Successfully reconnected to Stoat. Retrying message...');
+                            continue; // Retry the message
+                        } catch (reconnectError) {
+                            console.error('Failed to reconnect to Stoat:', reconnectError);
+                            throw new Error('Unauthorized - Bot authentication failed and reconnect unsuccessful');
+                        }
+                    }
+
                     // Check if it's a rate limit error
                     if (sendError.retry_after) {
                         const waitMs = sendError.retry_after;
@@ -193,7 +210,7 @@ async function importDiscordToStoat() {
                                 continue; // Retry
                             }
                         } catch (parseError) {
-                            // Not a JSON error, continue to reaction retry
+                            // Not a JSON error, continue
                         }
                     }
 
@@ -234,11 +251,28 @@ async function importDiscordToStoat() {
                 console.log(`Sending progress: ${i + 1}/${allMessages.length} (${((i + 1) / allMessages.length * 100).toFixed(1)}%)`);
             }
 
-            await new Promise(resolve => setTimeout(resolve, 50));
+            await new Promise(resolve => setTimeout(resolve, 100));
 
         } catch (error) {
-            console.error(`Failed to import message ${msg.Id} after all retries:`, error);
-            throw error;
+            // Check if it's a 401 Unauthorized that couldn't be recovered
+            if (error.message && error.message.includes('Unauthorized - Bot authentication failed')) {
+                console.error('STOPPING: Bot needs manual re-authentication');
+                throw error;
+            }
+
+            // For all other errors, log and skip the message
+            console.error(`Skipping message ${msg.Id} due to error:`, error);
+
+            // Save checkpoint so we skip this message next time
+            await checkpoint.save({
+                lastDiscordMessageId: msg.Id,
+                lastAuthor: lastAuthor,
+                lastTimestamp: msg.Timestamp,
+                messageIdMap: Object.fromEntries(messageIdMap)
+            });
+
+            // Continue to next message
+            continue;
         }
     }
 
