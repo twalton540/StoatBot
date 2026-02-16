@@ -115,14 +115,23 @@ const stoatClient = {
         }
 
         // Add embeds
+        // Add embeds
         if (discordMsg.Embeds && discordMsg.Embeds.length > 0) {
             payload.embeds = discordMsg.Embeds.map(embed => {
                 // Replace custom emojis and mentions in embed fields
+                let description = embed.Description || null;
+
+                // If there's an image URL, append it to the description
+                if (embed.ImageUrl) {
+                    description = description
+                        ? `${description}\n\n[Image](${embed.ImageUrl})`
+                        : `[Image](${embed.ImageUrl})`;
+                }
+
                 let processedEmbed = {
                     title: embed.Title || null,
-                    description: embed.Description || null,
+                    description: description,
                     url: embed.Url && embed.Url.length <= 256 ? embed.Url : null,
-                    media: embed.ImageUrl || null,
                     icon_url: embed.ThumbnailUrl || null
                 };
 
@@ -131,7 +140,9 @@ const stoatClient = {
                     if (replaceMentionsFn) {
                         processedEmbed.title = replaceMentionsFn(processedEmbed.title);
                     }
+                    if (processedEmbed.title.length > 100) processedEmbed.title = processedEmbed.title.substring(0, 99);
                 }
+
 
                 if (processedEmbed.description) {
                     processedEmbed.description = stoatClient.replaceCustomEmojis(processedEmbed.description);
@@ -142,8 +153,6 @@ const stoatClient = {
 
                 return processedEmbed;
             }).filter(e => {
-                // Only include embeds that have at least title, description, or url
-                // Don't send embeds with only media (images) as Stoat can't handle them
                 return e.title || e.description || e.url;
             });
         }
